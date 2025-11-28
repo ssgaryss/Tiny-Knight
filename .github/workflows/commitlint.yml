@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - main
-      - master
 
 jobs:
   commitlint:
@@ -16,34 +15,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 获取完整 commit 历史
+          fetch-depth: 0
+
+      - name: Fetch all branches
+        run: |
+          git fetch --all --prune
 
       - name: Validate commit messages
         run: |
-          # 定义允许的前缀
           PREFIXES="\[UPDATE\]|\[FEATURE\]|\[FIX\]|\[HOTFIX\]"
 
-          INVALID=0
-
-          # 确定 commit 范围
+          # commit 范围
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             RANGE="origin/${{ github.event.pull_request.base.ref }}..HEAD"
           else
-            RANGE="HEAD~10..HEAD"
+            RANGE="${{ github.event.before }}..${{ github.event.after }}"
           fi
 
-          # 检查每个 commit message
-          for MSG in $(git log --pretty=format:"%s" $RANGE); do
-            echo "Checking: $MSG"
-            if ! echo "$MSG" | grep -Eq "^($PREFIXES)"; then
-              echo "❌ Invalid commit message: $MSG"
-              INVALID=1
-            fi
-          done
+          echo "Checking range: $RANGE"
 
-          # 如果有不合法 commit，CI 失败
-          if [ $INVALID -ne 0 ]; then
+          COMMITS=$(git log --no-merges --pretty=format:"%s" $RANGE || true)
+
+          if [ -z "$COMMITS" ]; then
+            echo "✔ No commits to check. Skipping."
+            exit 0
+          fi
+
+          INVALID=$(echo "$COMMITS" | grep -vcE "^($PREFIXES)" || true)
+
+          if [ "$INVALID" -ne 0 ]; then
             echo "⛔ Commit messages must start with one of: [UPDATE], [FEATURE], [FIX], [HOTFIX]"
+            echo "❌ Found $INVALID invalid commit(s):"
+            echo "$COMMITS" | grep -vE "^($PREFIXES)"
             exit 1
           fi
 
